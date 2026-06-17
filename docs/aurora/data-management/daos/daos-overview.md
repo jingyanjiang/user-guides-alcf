@@ -453,26 +453,26 @@ Each DAOS server node is based on the Intel Coyote Pass platform:
 
 DFS is essentially a POSIX emulation layer on top of DAOS and is implemented in the `libdfs` library, allowing a DAOS container to be accessed as a hierarchical POSIX namespace. `libdfs` supports files, directories, and symbolic links, but not hard links. The DAOS official documentation on DFS is [here](https://docs.daos.io/v2.6/user/filesystem).
 
-With more than 1024 servers at full deployment, the user-accessible cluster named `daos_user` has 16,384 solid state drives (SSDs) and 16,384 persistent memory modules, and without some amount of data redundancy a hardware failure on any one could result in the loss of your data.  DAOS has several data redundancy options available, and a tradeoff must be made between data resiliency, performance, and volume.  The recommended tradeoff is to specify a redundancy factor of 3 on the container for both files and directories via the `rd_fac:3` container property.  By default, this means files will utilize an erasure coding algorithm with a ratio of 16 data blocks to 3 parity blocks (in DAOS file object class terms `EC_16P3GX`), which in simplest terms, means 19 blocks of erasure coding stores 16 blocks of data. For directories, the default is to create 3 full duplicates of the directory, which is basically an emulation of an inode in traditional file system terms, by setting the directory object class to `RP_4G1`. For this default setting, there is little performance tradeoff for directories at this redundancy level, since it just contains metadata.
+With more than 1024 servers at full deployment, the user-accessible cluster named `daos_user` has 16,384 solid state drives (SSDs) and 16,384 persistent memory modules, and without some amount of data redundancy a hardware failure on any one could result in the loss of your data.  DAOS has several data redundancy options available, and a tradeoff must be made between data resiliency, performance, and volume.  The recommended tradeoff is to specify a redundancy factor of 3 on the container for both files and directories via the `rd_fac:3` container property.  By default, this means files will utilize an erasure coding algorithm with a ratio of 16 data blocks to 3 parity blocks (in DAOS file object class terms `EC_16P3G32`), which in simplest terms, means 19 blocks of erasure coding stores 16 blocks of data. For directories, the default is to create 3 full duplicates of the directory, which is basically an emulation of an inode in traditional file system terms, by setting the directory object class to `RP_4G1`. For this default setting, there is little performance tradeoff for directories at this redundancy level, since it just contains metadata.
 
 In the scenario with the above settings, when a server failure occurs, be it a software or hardware failure (e.g. an SSD, persistent memory module, or a networking switch failure) on up to 3 servers, a process called a _rebuild_ occurs. During rebuild, the data on the failed servers is reconstructed to preserve data integrity, and the servers with the failures are excluded from the cluster. The servers or network can be repaired in the future so that the servers are eventually reintegrated to the cluster.  The rebuild process in this scenario does not disrupt service, and the cluster does not experience any outage.  If more than 3 servers are lost (say, due to a network issue) or more servers are lost during the rebuild, then the cluster will be taken offline to conduct repairs.
 
 These parameters are set at container creation as follows along with others which will be described below for best practices:
 ```bash linenums="1"
-daos container create --type=POSIX  --chunk-size=2097152  --properties=rd_fac:3,ec_cell_sz:131072,cksum:crc32,srv_cksum:on --file-oclass=EC_16P3GX --dir-oclass=RP_4G1  ${DAOS_POOL} ${DAOS_CONT} 
+daos container create --type=POSIX  --chunk-size=2097152  --properties=rd_fac:3,ec_cell_sz:131072,cksum:crc32,srv_cksum:on --file-oclass=EC_16P3G32 --dir-oclass=RP_4G1  ${DAOS_POOL} ${DAOS_CONT} 
 ```
 
 The chunk-size of 2 MB and the `ec_cell_sz` (erasure coding cell size) of 128 KB work together to optimally stripe the data across the 16 data servers plus 3 parity servers (19 erasure coding servers) and set the maximum amount of data written to one SSD on one server by one client per transaction to the `ec_cell_sz` of 128 KB. The general rule of thumb is the chunk-size should equal the number of data servers (excluding parity servers) multiplied by the `ec_cell_sz` or at least be an even multiple of it.  If your application does large amounts of IO per process, you could experiment with the settings by increasing them proportionately, e.g. setting the chunk-size to 16 MB and the `ec_cell_sz` to 1 MB.  DAOS containers have a property for both server and client checksum, whereby the client will retry the data transfer to or from the server in the case of corruption, however by default this is disabled, to enable it for best performance and acceptable accuracy usage of the CRC-32 algorithm is recommended with the above parameters `cksum:crc32,srv_cksum:on`.
 
-Now, the `GX` in `EC_16P3GX` tells the container to stripe the data across all servers in the pool, which is optimum if your application is writing a single shared file or at most one file per node, but instead if your application is writing more than one file per node, say file per process, for best performance you should change the `GX` to `G32`, the 32 being the hard-coded number of servers the data in the file will be striped across.  You can do this in one of two ways:
+Now, the `G32` in `EC_16P3G32` tells the container to stripe the file across 32 servers in the pool, which is optimum if your application is writing file per node or file per process, but instead if your application is writing a single shared file - which can be the case for MPI-IO or IO libraries like HDF5 or PNetCDF - then for best performance you should change the `G32` to `GX`, whereby the file will be striped across all servers in the pool.  You can do this in one of two ways:
 
 1. Use the `--file-oclass` parameter explicitly in the container creation. The call would look like:
 ```bash
-daos container create --type=POSIX  --chunk-size=2097152 --file-oclass=EC_16P3G32 --dir-oclass=RP_4G1 --properties=rd_fac:3,ec_cell_sz:131072,cksum:crc32,srv_cksum:on  ${DAOS_POOL} ${DAOS_CONT}
+daos container create --type=POSIX  --chunk-size=2097152 --file-oclass=EC_16P3GX --dir-oclass=RP_4G1 --properties=rd_fac:3,ec_cell_sz:131072,cksum:crc32,srv_cksum:on  ${DAOS_POOL} ${DAOS_CONT}
 ```
-2. Create a subdirectory in the container and set the attribute on it. For example, if your container was created with `EC_16P3GX` and you wanted a subdirectory `<dir name>` to have `EC_16P3G32`, mount the container (this is described in the [POSIX Container Access via DFUSE](#posix-container-access-via-dfuse) section below) with directory `<dir name>` at `/tmp/${DAOS_POOL}/${DAOS_CONT}` and then:
+2. Create a subdirectory in the container and set the attribute on it. For example, if your container was created with `EC_16P3G32` and you wanted a subdirectory `<dir name>` to have `EC_16P3GX`, mount the container (this is described in the [POSIX Container Access via DFUSE](#posix-container-access-via-dfuse) section below) with directory `<dir name>` at `/tmp/${DAOS_POOL}/${DAOS_CONT}` and then:
 ```bash
-daos fs set-attr --path=/tmp/${DAOS_POOL}/${DAOS_CONT}/<dir_name> --oclass=EC_16P3G32
+daos fs set-attr --path=/tmp/${DAOS_POOL}/${DAOS_CONT}/<dir_name> --oclass=EC_16P3GX
 ```
 By default any top-level directory created in a container will inherit the directory and file object class from the container, and any subdirectory inherits from its parent, so in this fashion you can change the default and have a mix of file object classes in the same container.
 
@@ -584,9 +584,51 @@ daos container get-prop  ${DAOS_POOL}  ${DAOS_CONTAINER}
 
 You can also use the following commands for further diagnosis.
 
-```bash
+```bash linenums="1"
 daos pool      autotest  ${DAOS_POOL}
-daos container check --pool=${DAOS_POOL} --cont=${DAOS_CONTAINER}
+
+> daos pool      autotest datascience
+Step Operation                 Status Time(sec) Comment
+  0  Initializing DAOS          PASS    0.000  
+  1  Connecting to pool         PASS    0.012  
+  2  Creating containers        PASS    0.004  
+  3  Opening container          PASS    0.028  
+ 10  Generating 1M S1 layouts   PASS    2.774   360.48K IO/sec
+ 11  Generating 10K SX layouts  PASS    0.028   359.75K IO/sec
+ 20  Inserting 128B values      PASS   30.004    60.80K IO/sec
+ 21  Reading 128B values back   PASS   28.755    63.84K IO/sec
+ 23  Punching object            PASS    0.009  
+ 24  Inserting 4KB values       PASS   30.004    58.06K IO/sec
+ 25  Reading 4KB values back    PASS   29.323    60.55K IO/sec
+ 27  Punching object            PASS    0.009  
+ 28  Inserting 1MB values       PASS   30.006     5.54K IO/sec
+ 29  Reading 1MB values back    PASS   39.888    12.90K IO/sec
+ 31  Punching object            PASS    0.009  
+ 40  Inserting into RF1 cont    PASS   30.004    61.95K IO/sec
+ 41  Reading RF1 values back    PASS   28.615    65.28K IO/sec
+ 42  Inserting into RF2 cont    PASS   30.005    60.20K IO/sec
+ 43  Reading RF2 values back    PASS   31.091    58.34K IO/sec
+ 96  Closing containers         PASS    0.009  
+ 97  Destroying containers      PASS    0.010  
+ 98  Disconnecting from pool    PASS    0.001  
+ 99  Tearing down DAOS          PASS    0.000  
+
+All steps passed.
+
+daos container check -p <PATH_TO_MOUNTED_CONTAINER>
+
+> daos container check -p /tmp/datascience/hacc-io-mr-17-1024 
+check container 74a6ecd1-5a9e-41cc-b544-720a91f13199 started at: Mon Mar 30 17:53:41 2026
+check container 74a6ecd1-5a9e-41cc-b544-720a91f13199 completed at: Mon Mar 30 17:53:41 2026
+checked: 2
+skipped: 0
+inconsistent: 0
+run_time: 1 seconds
+scan_speed: 2 objs/sec
+
+
+object ERR  src/object/cli_shard.c:858 dc_rw_cb()   DER_FETCH_AGAIN(-2032): 'Fetch again' can be safely ignored.
+
 ```
 
 There are example programs and job scripts provided under `/soft/daos/examples/`.
@@ -738,6 +780,13 @@ echo ${DAOS_AGENT_DRPC_DIR}
 /run/daos_agent_oneScratch
 ```
 
+Check different dfuse launching scripts at /soft/daos/bin.
+
+Note: Applications which require mmap (specifically, torch titan) should use 
+```bash linenums="1"
+launch-dfuse-with-caching.sh ${DAOS_POOL}:${DAOS_CONT}.
+```
+
 ### Quick Troubleshooting Checklist
 
 #### Submission and Environment
@@ -787,8 +836,8 @@ echo ${DAOS_AGENT_DRPC_DIR}
     ```
 11. Run explicit DAOS pool/container health checks:
     ```bash linenums="1"
-    daos pool autotest
-    daos container check
+    daos pool autotest  ${DAOS_POOL}
+    daos container check -p <PATH_TO_MOUNTED_CONTAINER>
     ```
 
 #### Escalation

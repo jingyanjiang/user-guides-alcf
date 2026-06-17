@@ -18,17 +18,17 @@ There are four production queues you can target in your qsub (`-q <queue name>`)
 | Queue Name      | Node Min | Node Max   | Time Min | Time Max | Notes                                                                                                                                                                                                                                                                 |
 |-----------------|----------|------------|----------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | small           | 256      | 1024       | 5 min    | 12 hrs   |                                                                                                                                                                                                                                                                       |
-| medium          | 1025     | 1919       | 5 min    | 18 hrs   |                                                                                                                                                                                                                                                                       |
-| large           | 1920     | 10,624[^1] | 5 min    | 24 hrs   |                                                                                                                                                                                                                                                                       |
+| medium          | 1025     | 1919       | 5 min    | 18 hrs   | **Starting 6/19/26, max job size will be 1999 nodes**                                                                                                                                                                                                                                                                      |
+| large           | 1920     | 10,624[^1] | 5 min    | 24 hrs   | **Starting 6/19/26, min job size will be 2000 nodes**                                                                                                                                                                                                                    |
 | backfill-small  | 256      | 1024       | 5 min    | 12 hrs   | Low priority, negative project balance                                                                                                                                                                                                                                |
-| backfill-medium | 1025     | 1919       | 5 min    | 18 hrs   | Low priority, negative project balance                                                                                                                                                                                                                                |
-| backfill-large  | 1920     | 10,624[^1] | 5 min    | 24 hrs   | Low priority, negative project balance; theoretical max; stable max nodecount may vary; see [pbsnodes](../running-jobs/index.md/#pbsnodes-get-information-about-the-current-state-of-nodes) and [pbs-tui](https://github.com/saforem2/pbs-tui) for current nodecount. |
+| backfill-medium | 1025     | 1919       | 5 min    | 18 hrs   | Low priority, negative project balance. **Starting 6/19/26, max job size will be 1999 nodes**                                                                                                                                                                                                                                 |
+| backfill-large  | 1920     | 10,624[^1] | 5 min    | 24 hrs   | Low priority, negative project balance; theoretical max; stable max nodecount may vary; see [pbsnodes](../running-jobs/index.md/#pbsnodes-get-information-about-the-current-state-of-nodes) and [pbs-tui](https://github.com/saforem2/pbs-tui) for current nodecount. **Starting 6/19/26, min job size will be 2000 nodes**  |
 
 [^1]: Theoretical max node count. The stable max node count may vary; see [pbsnodes](../running-jobs/index.md/#pbsnodes-get-information-about-the-current-state-of-nodes) and [pbs-tui](https://github.com/saforem2/pbs-tui) for current node count. The maximum available node count will decrease during testing of a new compute image in the `next-eval` queue, where approximately 2,600 nodes are allocated.
 
 !!! warning
 
-    You cannot submit to these queues directly; you can only submit to the routing queue `prod` or `prod-large`.
+    You cannot submit to these queues directly; you can only submit to the routing queue `prod`.
 
 !!! note
 
@@ -266,6 +266,10 @@ echo "NUM_OF_NODES= ${NNODES} TOTAL_NUM_RANKS= ${NTOTRANKS} RANKS_PER_NODE= ${NR
 
 mpiexec -n ${NTOTRANKS} -ppn ${NRANKS} --depth=${NDEPTH} --cpu-bind depth -env OMP_NUM_THREADS=${NTHREADS} --env OMP_PLACES=cores ./hello_affinity_aurora.out
 ```
+
+!!! tip
+
+      In some cases of network or node failures, `mpiexec` will return a non-zero value. If there are multiple `mpiexec` commands in the submission script, it is highly recommended to check that each `mpiexec` either returns 0 or (if the application is expected to return non-zero) that it returns the exit code the user expects before executing subsequent `mpiexec` commands. 
 
 ## <a name="Running-GPU-enabled-Applications"></a>Running GPU-enabled Applications
 
